@@ -29,6 +29,14 @@ pub fn start_mock_direct(
   switch: server.Server,
   id: server.ClientId,
 ) -> Result(Client, String) {
+  start_mock_direct_dev(switch, id)
+}
+
+/// 启动一个使用 mock device 且直连本机 `vswitch` 的 VPort，并尝试解析开发期 helper 路径。
+pub fn start_mock_direct_dev(
+  switch: server.Server,
+  id: server.ClientId,
+) -> Result(Client, String) {
   case runtime.start_mock_direct(switch, id, handle_message) {
     Ok(subject) -> Ok(Client(subject))
     Error(reason) -> Error(reason)
@@ -37,6 +45,15 @@ pub fn start_mock_direct(
 
 /// 启动一个使用真实 TAP 设备且直连本机 `vswitch` 的 VPort。
 pub fn start_tap_direct(
+  switch: server.Server,
+  id: server.ClientId,
+  tap_name: String,
+) -> Result(Client, String) {
+  start_tap_direct_dev(switch, id, tap_name)
+}
+
+/// 启动一个使用真实 TAP 设备且直连本机 `vswitch` 的 VPort，并尝试解析开发期 helper 路径。
+pub fn start_tap_direct_dev(
   switch: server.Server,
   id: server.ClientId,
   tap_name: String,
@@ -51,6 +68,13 @@ pub fn start_tap_direct(
 pub fn start_mock_udp(
   config: udp_client.UdpClientConfig,
 ) -> Result(Client, String) {
+  start_mock_udp_dev(config)
+}
+
+/// 启动一个使用 mock device 且通过 UDP 连接远端 `vswitch` 的 VPort，并尝试解析开发期 helper 路径。
+pub fn start_mock_udp_dev(
+  config: udp_client.UdpClientConfig,
+) -> Result(Client, String) {
   case runtime.start_mock_udp(config, handle_message) {
     Ok(subject) -> Ok(Client(subject))
     Error(reason) -> Error(reason)
@@ -62,7 +86,85 @@ pub fn start_tap_udp(
   config: udp_client.UdpClientConfig,
   tap_name: String,
 ) -> Result(Client, String) {
+  start_tap_udp_dev(config, tap_name)
+}
+
+/// 启动一个使用真实 TAP 设备且通过 UDP 连接远端 `vswitch` 的 VPort，并尝试解析开发期 helper 路径。
+pub fn start_tap_udp_dev(
+  config: udp_client.UdpClientConfig,
+  tap_name: String,
+) -> Result(Client, String) {
   case runtime.start_tap_udp(config, tap_name, handle_message) {
+    Ok(subject) -> Ok(Client(subject))
+    Error(reason) -> Error(reason)
+  }
+}
+
+/// 启动一个使用 mock device 且直连本机 `vswitch` 的 VPort，并显式指定 helper 路径。
+pub fn start_mock_direct_with_helper(
+  switch: server.Server,
+  id: server.ClientId,
+  helper_path: String,
+) -> Result(Client, String) {
+  case
+    runtime.start_mock_direct_with_helper(
+      switch,
+      id,
+      helper_path,
+      handle_message,
+    )
+  {
+    Ok(subject) -> Ok(Client(subject))
+    Error(reason) -> Error(reason)
+  }
+}
+
+/// 启动一个使用真实 TAP 设备且直连本机 `vswitch` 的 VPort，并显式指定 helper 路径。
+pub fn start_tap_direct_with_helper(
+  switch: server.Server,
+  id: server.ClientId,
+  tap_name: String,
+  helper_path: String,
+) -> Result(Client, String) {
+  case
+    runtime.start_tap_direct_with_helper(
+      switch,
+      id,
+      tap_name,
+      helper_path,
+      handle_message,
+    )
+  {
+    Ok(subject) -> Ok(Client(subject))
+    Error(reason) -> Error(reason)
+  }
+}
+
+/// 启动一个使用 mock device 且通过 UDP 连接远端 `vswitch` 的 VPort，并显式指定 helper 路径。
+pub fn start_mock_udp_with_helper(
+  config: udp_client.UdpClientConfig,
+  helper_path: String,
+) -> Result(Client, String) {
+  case runtime.start_mock_udp_with_helper(config, helper_path, handle_message) {
+    Ok(subject) -> Ok(Client(subject))
+    Error(reason) -> Error(reason)
+  }
+}
+
+/// 启动一个使用真实 TAP 设备且通过 UDP 连接远端 `vswitch` 的 VPort，并显式指定 helper 路径。
+pub fn start_tap_udp_with_helper(
+  config: udp_client.UdpClientConfig,
+  tap_name: String,
+  helper_path: String,
+) -> Result(Client, String) {
+  case
+    runtime.start_tap_udp_with_helper(
+      config,
+      tap_name,
+      helper_path,
+      handle_message,
+    )
+  {
     Ok(subject) -> Ok(Client(subject))
     Error(reason) -> Error(reason)
   }

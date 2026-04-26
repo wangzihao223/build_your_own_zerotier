@@ -1,3 +1,5 @@
+import gleam/dynamic.{type Dynamic}
+
 /// 外部 helper 进程对应的 Erlang port 句柄。
 pub type Port
 
@@ -20,6 +22,10 @@ pub fn send_frame(port: Port, frame: BitArray) -> Nil
 /// 从 port 读取一条消息。
 @external(erlang, "port_bridge_ffi", "receive_message")
 pub fn receive_message(port: Port, timeout_ms: Int) -> PortMessage
+
+/// 尝试把任意 BEAM 消息解码成指定 port 发来的消息。
+@external(erlang, "port_bridge_ffi", "decode_message")
+pub fn decode_message(port: Port, message: Dynamic) -> Result(PortMessage, Nil)
 
 /// 停止 port 对应的外部进程。
 @external(erlang, "port_bridge_ffi", "stop")

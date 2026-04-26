@@ -1,5 +1,5 @@
 -module(port_bridge_ffi).
--export([start/2, send_frame/2, receive_message/2, stop/1]).
+-export([start/2, send_frame/2, receive_message/2, decode_message/2, stop/1]).
 
 start(Command, Args) when is_binary(Command), is_list(Args) ->
     CommandString = binary_to_list(Command),
@@ -39,6 +39,13 @@ receive_message(Port, TimeoutMs) ->
     after TimeoutMs ->
         timeout
     end.
+
+decode_message(Port, {Port, {data, Frame}}) ->
+    {ok, {frame, Frame}};
+decode_message(Port, {Port, {exit_status, Code}}) ->
+    {ok, {exit_status, Code}};
+decode_message(_Port, _Message) ->
+    {error, nil}.
 
 stop(Port) ->
     true = port_close(Port),

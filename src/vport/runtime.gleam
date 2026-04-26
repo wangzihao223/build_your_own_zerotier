@@ -35,9 +35,18 @@ pub fn start_mock_direct(
   id: server.ClientId,
   handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
 ) -> Result(Subject(Message(a)), String) {
+  start_mock_direct_dev(switch, id, handle_message)
+}
+
+/// 启动一个 mock device + 本机直连 transport 的 VPort runtime，并尝试解析开发期 helper 路径。
+pub fn start_mock_direct_dev(
+  switch: server.Server,
+  id: server.ClientId,
+  handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
+) -> Result(Subject(Message(a)), String) {
   start_with(
     fn() {
-      case device.start_mock(), vswitch_transport.connect(switch, id) {
+      case device.start_mock_dev(), vswitch_transport.connect(switch, id) {
         Ok(device_adapter), Ok(transport_adapter) ->
           Ok(State(device: device_adapter, transport: transport_adapter))
 
@@ -56,9 +65,71 @@ pub fn start_tap_direct(
   tap_name: String,
   handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
 ) -> Result(Subject(Message(a)), String) {
+  start_tap_direct_dev(switch, id, tap_name, handle_message)
+}
+
+/// 启动一个 TAP device + 本机直连 transport 的 VPort runtime，并尝试解析开发期 helper 路径。
+pub fn start_tap_direct_dev(
+  switch: server.Server,
+  id: server.ClientId,
+  tap_name: String,
+  handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
+) -> Result(Subject(Message(a)), String) {
   start_with(
     fn() {
-      case device.start_tap(tap_name), vswitch_transport.connect(switch, id) {
+      case
+        device.start_tap_dev(tap_name),
+        vswitch_transport.connect(switch, id)
+      {
+        Ok(device_adapter), Ok(transport_adapter) ->
+          Ok(State(device: device_adapter, transport: transport_adapter))
+
+        Error(reason), _ -> Error(reason)
+        _, Error(reason) -> Error(reason)
+      }
+    },
+    handle_message,
+  )
+}
+
+/// 启动一个 mock device + 本机直连 transport 的 VPort runtime，并显式指定 helper 路径。
+pub fn start_mock_direct_with_helper(
+  switch: server.Server,
+  id: server.ClientId,
+  helper_path: String,
+  handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
+) -> Result(Subject(Message(a)), String) {
+  start_with(
+    fn() {
+      case
+        device.start_mock_with_helper(helper_path),
+        vswitch_transport.connect(switch, id)
+      {
+        Ok(device_adapter), Ok(transport_adapter) ->
+          Ok(State(device: device_adapter, transport: transport_adapter))
+
+        Error(reason), _ -> Error(reason)
+        _, Error(reason) -> Error(reason)
+      }
+    },
+    handle_message,
+  )
+}
+
+/// 启动一个 TAP device + 本机直连 transport 的 VPort runtime，并显式指定 helper 路径。
+pub fn start_tap_direct_with_helper(
+  switch: server.Server,
+  id: server.ClientId,
+  tap_name: String,
+  helper_path: String,
+  handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
+) -> Result(Subject(Message(a)), String) {
+  start_with(
+    fn() {
+      case
+        device.start_tap_with_helper(tap_name, helper_path),
+        vswitch_transport.connect(switch, id)
+      {
         Ok(device_adapter), Ok(transport_adapter) ->
           Ok(State(device: device_adapter, transport: transport_adapter))
 
@@ -75,9 +146,17 @@ pub fn start_mock_udp(
   config: udp_transport.UdpClientConfig,
   handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
 ) -> Result(Subject(Message(a)), String) {
+  start_mock_udp_dev(config, handle_message)
+}
+
+/// 启动一个 mock device + 远端 UDP transport 的 VPort runtime，并尝试解析开发期 helper 路径。
+pub fn start_mock_udp_dev(
+  config: udp_transport.UdpClientConfig,
+  handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
+) -> Result(Subject(Message(a)), String) {
   start_with(
     fn() {
-      case device.start_mock(), udp_transport.connect(config) {
+      case device.start_mock_dev(), udp_transport.connect(config) {
         Ok(device_adapter), Ok(transport_adapter) ->
           Ok(State(device: device_adapter, transport: transport_adapter))
 
@@ -95,9 +174,65 @@ pub fn start_tap_udp(
   tap_name: String,
   handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
 ) -> Result(Subject(Message(a)), String) {
+  start_tap_udp_dev(config, tap_name, handle_message)
+}
+
+/// 启动一个 TAP device + 远端 UDP transport 的 VPort runtime，并尝试解析开发期 helper 路径。
+pub fn start_tap_udp_dev(
+  config: udp_transport.UdpClientConfig,
+  tap_name: String,
+  handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
+) -> Result(Subject(Message(a)), String) {
   start_with(
     fn() {
-      case device.start_tap(tap_name), udp_transport.connect(config) {
+      case device.start_tap_dev(tap_name), udp_transport.connect(config) {
+        Ok(device_adapter), Ok(transport_adapter) ->
+          Ok(State(device: device_adapter, transport: transport_adapter))
+
+        Error(reason), _ -> Error(reason)
+        _, Error(reason) -> Error(udp_error_to_string(reason))
+      }
+    },
+    handle_message,
+  )
+}
+
+/// 启动一个 mock device + 远端 UDP transport 的 VPort runtime，并显式指定 helper 路径。
+pub fn start_mock_udp_with_helper(
+  config: udp_transport.UdpClientConfig,
+  helper_path: String,
+  handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
+) -> Result(Subject(Message(a)), String) {
+  start_with(
+    fn() {
+      case
+        device.start_mock_with_helper(helper_path),
+        udp_transport.connect(config)
+      {
+        Ok(device_adapter), Ok(transport_adapter) ->
+          Ok(State(device: device_adapter, transport: transport_adapter))
+
+        Error(reason), _ -> Error(reason)
+        _, Error(reason) -> Error(udp_error_to_string(reason))
+      }
+    },
+    handle_message,
+  )
+}
+
+/// 启动一个 TAP device + 远端 UDP transport 的 VPort runtime，并显式指定 helper 路径。
+pub fn start_tap_udp_with_helper(
+  config: udp_transport.UdpClientConfig,
+  tap_name: String,
+  helper_path: String,
+  handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
+) -> Result(Subject(Message(a)), String) {
+  start_with(
+    fn() {
+      case
+        device.start_tap_with_helper(tap_name, helper_path),
+        udp_transport.connect(config)
+      {
         Ok(device_adapter), Ok(transport_adapter) ->
           Ok(State(device: device_adapter, transport: transport_adapter))
 
