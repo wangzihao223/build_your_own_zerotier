@@ -1,4 +1,4 @@
-# build_your_own_zerorier
+# build_your_own_zerotier
 
 这是一个**库项目**，不是最终的 server/client 可执行程序。
 

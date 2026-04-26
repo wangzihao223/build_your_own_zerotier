@@ -1,4 +1,4 @@
-name = "build_your_own_zerorier"
+name = "build_your_own_zerotier"
 version = "1.0.0"
 description = "A small ZeroTier-style layer-2 overlay networking library built with Gleam, Erlang/OTP, and a Python TAP helper."
 
