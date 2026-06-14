@@ -216,14 +216,15 @@ fn do_bind_endpoint(
     Error(Nil) -> state.by_endpoint
   }
 
-  // 每次 bind 都创建新 receiver + 新 forwarder，
-  // 旧 forwarder 因为 vswitch 不再发给旧 receiver 而自然停止收帧。
-  let receiver = server.new_receiver()
-  server.connect(state.switch, client_id, receiver)
-
+  // receiver 必须在 forwarder 进程内部创建，forwarder 才是 owner，才能 receive。
+  let switch = state.switch
   let sessions_self = state.self
   let _ =
-    spawn_unlinked(fn() { forwarder_loop(endpoint, receiver, sessions_self) })
+    spawn_unlinked(fn() {
+      let receiver = server.new_receiver()
+      server.connect(switch, client_id, receiver)
+      forwarder_loop(endpoint, receiver, sessions_self)
+    })
 
   SessionsState(
     ..state,
