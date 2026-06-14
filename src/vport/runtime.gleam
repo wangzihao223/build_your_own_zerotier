@@ -297,7 +297,7 @@ fn start_with(
   handle_message: fn(State, Message(a)) -> otp_actor.Next(State, Message(a)),
 ) -> Result(Subject(Message(a)), String) {
   let builder =
-    otp_actor.new_with_initialiser(1000, fn(subject) {
+    otp_actor.new_with_initialiser(10_000, fn(subject) {
       case open_state() {
         Ok(state) ->
           Ok(otp_actor.initialised(state) |> otp_actor.returning(subject))
@@ -309,6 +309,7 @@ fn start_with(
   case otp_actor.start(builder) {
     Ok(started) -> Ok(started.data)
     Error(otp_actor.InitFailed(reason)) -> Error(reason)
+    Error(otp_actor.InitTimeout) -> Error("init_timeout")
     Error(_) -> Error("failed to start vport actor")
   }
 }

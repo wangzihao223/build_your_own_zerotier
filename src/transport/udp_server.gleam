@@ -57,7 +57,8 @@ type SessionsState {
 type SessionsMessage {
   BindEndpoint(client_id: String, endpoint: Endpoint)
   LookupByEndpoint(endpoint: Endpoint, reply_to: Subject(Result(String, Nil)))
-  GetAll(reply_to: Subject(List(ClientSession)))
+  // sessions actor 自己 drain 所有 receiver，返回待发帧列表
+  PollAll(reply_to: Subject(List(#(Endpoint, BitArray))))
 }
 
 // --- Public API ---
@@ -65,9 +66,9 @@ type SessionsMessage {
 /// 启动一个 UDP server。
 ///
 /// 内部分为三个并行部分：
-/// - sessions actor：管理 client_id <-> endpoint 双向索引
+/// - sessions actor：管理会话索引，并负责 drain vswitch 下行 receiver
 /// - upstream 进程：专门处理 UDP 入包，上行帧送入 vswitch
-/// - downstream 进程：专门刷 vswitch 下行帧，发回对应客户端
+/// - downstream 进程：驱动 sessions actor 轮询，把帧发回客户端
 pub fn start(config: UdpServerConfig) -> Result(UdpServer, ServerError) {
   let ack = new_subject()
   let _ = spawn_unlinked(fn() { server_process(config, ack) })
@@ -89,7 +90,7 @@ pub fn stop(server: UdpServer) -> Nil {
   send(server.control, Stop)
 }
 
-// --- 主进程：负责启动子进程，等待 Stop 后统一关闭 ---
+// --- 主进程 ---
 
 fn server_process(config: UdpServerConfig, ack: Subject(StartAck)) -> Nil {
   case net.port(config.bind_port) {
@@ -99,12 +100,13 @@ fn server_process(config: UdpServerConfig, ack: Subject(StartAck)) -> Nil {
           case udp.port(socket) {
             Ok(actual_port) -> {
               let control = new_subject()
-              let upstream_control = new_subject()
-              let downstream_control = new_subject()
               let sessions = start_sessions_actor(config.vswitch)
 
+              let upstream_ack = new_subject()
               let _ =
                 spawn_unlinked(fn() {
+                  let upstream_control = new_subject()
+                  send(upstream_ack, upstream_control)
                   upstream_loop(
                     config.vswitch,
                     socket,
@@ -113,10 +115,16 @@ fn server_process(config: UdpServerConfig, ack: Subject(StartAck)) -> Nil {
                   )
                 })
 
+              let downstream_ack = new_subject()
               let _ =
                 spawn_unlinked(fn() {
+                  let downstream_control = new_subject()
+                  send(downstream_ack, downstream_control)
                   downstream_loop(socket, sessions, downstream_control)
                 })
+
+              let assert Ok(upstream_control) = receive(upstream_ack, 1000)
+              let assert Ok(downstream_control) = receive(downstream_ack, 1000)
 
               send(ack, Started(net.port_to_int(actual_port), control))
               wait_for_stop(control, upstream_control, downstream_control, socket)
@@ -150,6 +158,9 @@ fn wait_for_stop(
 }
 
 // --- Sessions actor ---
+//
+// receiver 由 sessions actor 创建并持有，只有它自己能 receive。
+// PollAll 让它 drain 所有 receiver 并把帧返回给调用方。
 
 fn start_sessions_actor(switch: server.Server) -> Subject(SessionsMessage) {
   let builder =
@@ -177,10 +188,27 @@ fn handle_sessions_message(
       otp_actor.continue(state)
     }
 
-    GetAll(reply_to) -> {
-      send(reply_to, dict.values(state.by_client_id))
+    PollAll(reply_to) -> {
+      let frames =
+        dict.values(state.by_client_id)
+        |> list.flat_map(fn(session) {
+          drain_receiver(session.endpoint, session.receiver, [])
+        })
+      send(reply_to, frames)
       otp_actor.continue(state)
     }
+  }
+}
+
+fn drain_receiver(
+  endpoint: Endpoint,
+  receiver: server.ForwardedReceiver,
+  acc: List(#(Endpoint, BitArray)),
+) -> List(#(Endpoint, BitArray)) {
+  case server.receive_forwarded(receiver, 0) {
+    server.Forwarded(_, frame) ->
+      drain_receiver(endpoint, receiver, [#(endpoint, frame), ..acc])
+    server.Timeout -> acc
   }
 }
 
@@ -209,7 +237,7 @@ fn do_bind_endpoint(
   )
 }
 
-// --- Upstream 进程：专门处理 UDP 入包 ---
+// --- Upstream 进程 ---
 
 fn upstream_loop(
   switch: server.Server,
@@ -271,7 +299,10 @@ fn handle_upstream_packet(
   }
 }
 
-// --- Downstream 进程：专门刷 vswitch 下行帧 ---
+// --- Downstream 进程 ---
+//
+// 不直接碰 receiver，只向 sessions actor 发 PollAll，
+// 拿回已 drain 好的帧列表，再逐一发出 UDP。
 
 fn downstream_loop(
   socket: udp.Udp,
@@ -281,41 +312,25 @@ fn downstream_loop(
   case receive(control, 1) {
     Ok(Stop) -> Nil
     Error(Nil) -> {
-      flush_all_sessions(socket, sessions)
+      let reply_to = new_subject()
+      send(sessions, PollAll(reply_to))
+      case receive(reply_to, 100) {
+        Ok(frames) ->
+          list.each(frames, fn(entry) {
+            let #(Endpoint(ip_address:, port:), frame) = entry
+            let _ =
+              send_server_message(
+                socket,
+                ip_address,
+                port,
+                udp_protocol.ServerFrame(frame),
+              )
+            Nil
+          })
+        Error(Nil) -> Nil
+      }
       downstream_loop(socket, sessions, control)
     }
-  }
-}
-
-fn flush_all_sessions(
-  socket: udp.Udp,
-  sessions: Subject(SessionsMessage),
-) -> Nil {
-  let reply_to = new_subject()
-  send(sessions, GetAll(reply_to))
-  case receive(reply_to, 100) {
-    Ok(all_sessions) ->
-      list.each(all_sessions, fn(session) {
-        flush_session_frames(socket, session)
-      })
-    Error(Nil) -> Nil
-  }
-}
-
-fn flush_session_frames(socket: udp.Udp, session: ClientSession) -> Nil {
-  case server.receive_forwarded(session.receiver, 0) {
-    server.Forwarded(_, frame) -> {
-      let Endpoint(ip_address:, port:) = session.endpoint
-      let _ =
-        send_server_message(
-          socket,
-          ip_address,
-          port,
-          udp_protocol.ServerFrame(frame),
-        )
-      flush_session_frames(socket, session)
-    }
-    server.Timeout -> Nil
   }
 }
 
