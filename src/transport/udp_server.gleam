@@ -40,35 +40,35 @@ type Endpoint {
   Endpoint(ip_address: net.IpAddress, port: net.Port)
 }
 
-type ClientSession {
-  ClientSession(endpoint: Endpoint, receiver: server.ForwardedReceiver)
-}
-
 // --- Sessions actor ---
+//
+// 每个 session 对应一个 forwarder 进程，forwarder 持有 receiver（Subject owner），
+// 收到下行帧后发 GotFrame 给 sessions actor。
+// sessions actor 自己只处理 SessionsMessage，不碰任何 receiver。
+
+type ClientSession {
+  ClientSession(endpoint: Endpoint)
+}
 
 type SessionsState {
   SessionsState(
     switch: server.Server,
+    self: Subject(SessionsMessage),
     by_client_id: dict.Dict(String, ClientSession),
     by_endpoint: dict.Dict(Endpoint, String),
+    pending_frames: List(#(Endpoint, BitArray)),
   )
 }
 
 type SessionsMessage {
   BindEndpoint(client_id: String, endpoint: Endpoint)
   LookupByEndpoint(endpoint: Endpoint, reply_to: Subject(Result(String, Nil)))
-  // sessions actor 自己 drain 所有 receiver，返回待发帧列表
+  GotFrame(endpoint: Endpoint, frame: BitArray)
   PollAll(reply_to: Subject(List(#(Endpoint, BitArray))))
 }
 
 // --- Public API ---
 
-/// 启动一个 UDP server。
-///
-/// 内部分为三个并行部分：
-/// - sessions actor：管理会话索引，并负责 drain vswitch 下行 receiver
-/// - upstream 进程：专门处理 UDP 入包，上行帧送入 vswitch
-/// - downstream 进程：驱动 sessions actor 轮询，把帧发回客户端
 pub fn start(config: UdpServerConfig) -> Result(UdpServer, ServerError) {
   let ack = new_subject()
   let _ = spawn_unlinked(fn() { server_process(config, ack) })
@@ -80,12 +80,10 @@ pub fn start(config: UdpServerConfig) -> Result(UdpServer, ServerError) {
   }
 }
 
-/// 返回 UDP server 实际绑定的本地端口。
 pub fn bound_port(server: UdpServer) -> Int {
   server.bound_port
 }
 
-/// 停止 UDP server 及其所有子进程。
 pub fn stop(server: UdpServer) -> Nil {
   send(server.control, Stop)
 }
@@ -158,17 +156,21 @@ fn wait_for_stop(
 }
 
 // --- Sessions actor ---
-//
-// receiver 由 sessions actor 创建并持有，只有它自己能 receive。
-// PollAll 让它 drain 所有 receiver 并把帧返回给调用方。
 
 fn start_sessions_actor(switch: server.Server) -> Subject(SessionsMessage) {
   let builder =
-    otp_actor.new(SessionsState(
-      switch:,
-      by_client_id: dict.new(),
-      by_endpoint: dict.new(),
-    ))
+    otp_actor.new_with_initialiser(1000, fn(subject) {
+      Ok(
+        otp_actor.initialised(SessionsState(
+          switch:,
+          self: subject,
+          by_client_id: dict.new(),
+          by_endpoint: dict.new(),
+          pending_frames: [],
+        ))
+        |> otp_actor.returning(subject),
+      )
+    })
     |> otp_actor.on_message(handle_sessions_message)
 
   let assert Ok(started) = otp_actor.start(builder)
@@ -188,27 +190,18 @@ fn handle_sessions_message(
       otp_actor.continue(state)
     }
 
-    PollAll(reply_to) -> {
-      let frames =
-        dict.values(state.by_client_id)
-        |> list.flat_map(fn(session) {
-          drain_receiver(session.endpoint, session.receiver, [])
-        })
-      send(reply_to, frames)
-      otp_actor.continue(state)
-    }
-  }
-}
+    GotFrame(endpoint, frame) ->
+      otp_actor.continue(
+        SessionsState(
+          ..state,
+          pending_frames: [#(endpoint, frame), ..state.pending_frames],
+        ),
+      )
 
-fn drain_receiver(
-  endpoint: Endpoint,
-  receiver: server.ForwardedReceiver,
-  acc: List(#(Endpoint, BitArray)),
-) -> List(#(Endpoint, BitArray)) {
-  case server.receive_forwarded(receiver, 0) {
-    server.Forwarded(_, frame) ->
-      drain_receiver(endpoint, receiver, [#(endpoint, frame), ..acc])
-    server.Timeout -> acc
+    PollAll(reply_to) -> {
+      send(reply_to, state.pending_frames)
+      otp_actor.continue(SessionsState(..state, pending_frames: []))
+    }
   }
 }
 
@@ -217,24 +210,45 @@ fn do_bind_endpoint(
   client_id: String,
   endpoint: Endpoint,
 ) -> SessionsState {
-  let #(receiver, by_endpoint) = case dict.get(state.by_client_id, client_id) {
-    Ok(ClientSession(receiver:, endpoint: old_endpoint)) -> #(
-      receiver,
-      dict.delete(state.by_endpoint, old_endpoint),
-    )
-    Error(Nil) -> {
-      let receiver = server.new_receiver()
-      server.connect(state.switch, client_id, receiver)
-      #(receiver, state.by_endpoint)
-    }
+  let by_endpoint = case dict.get(state.by_client_id, client_id) {
+    Ok(ClientSession(endpoint: old_endpoint)) ->
+      dict.delete(state.by_endpoint, old_endpoint)
+    Error(Nil) -> state.by_endpoint
   }
 
-  let session = ClientSession(endpoint:, receiver:)
+  // 每次 bind 都创建新 receiver + 新 forwarder，
+  // 旧 forwarder 因为 vswitch 不再发给旧 receiver 而自然停止收帧。
+  let receiver = server.new_receiver()
+  server.connect(state.switch, client_id, receiver)
+
+  let sessions_self = state.self
+  let _ =
+    spawn_unlinked(fn() { forwarder_loop(endpoint, receiver, sessions_self) })
+
   SessionsState(
     ..state,
-    by_client_id: dict.insert(state.by_client_id, client_id, session),
+    by_client_id: dict.insert(
+      state.by_client_id,
+      client_id,
+      ClientSession(endpoint:),
+    ),
     by_endpoint: dict.insert(by_endpoint, endpoint, client_id),
   )
+}
+
+// forwarder 进程：持有 receiver，收到帧就发 GotFrame 给 sessions actor
+fn forwarder_loop(
+  endpoint: Endpoint,
+  receiver: server.ForwardedReceiver,
+  sessions: Subject(SessionsMessage),
+) -> Nil {
+  case server.receive_forwarded(receiver, 60_000) {
+    server.Forwarded(_, frame) -> {
+      send(sessions, GotFrame(endpoint, frame))
+      forwarder_loop(endpoint, receiver, sessions)
+    }
+    server.Timeout -> forwarder_loop(endpoint, receiver, sessions)
+  }
 }
 
 // --- Upstream 进程 ---
@@ -300,16 +314,13 @@ fn handle_upstream_packet(
 }
 
 // --- Downstream 进程 ---
-//
-// 不直接碰 receiver，只向 sessions actor 发 PollAll，
-// 拿回已 drain 好的帧列表，再逐一发出 UDP。
 
 fn downstream_loop(
   socket: udp.Udp,
   sessions: Subject(SessionsMessage),
   control: Subject(Control),
 ) -> Nil {
-  case receive(control, 1) {
+  case receive(control, 0) {
     Ok(Stop) -> Nil
     Error(Nil) -> {
       let reply_to = new_subject()
