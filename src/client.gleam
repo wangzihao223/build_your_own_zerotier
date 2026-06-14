@@ -28,7 +28,13 @@ pub fn main() {
     <> client_id,
   )
 
-  case vport.start_mock_udp(config) {
+  let tap = args.get_string(argv, "--tap", "")
+  let result = case tap {
+    "" -> vport.start_mock_udp(config)
+    name -> vport.start_tap_udp(config, name)
+  }
+
+  case result {
     Ok(client) -> {
       io.println("connected")
       pump_loop(client)
