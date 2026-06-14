@@ -29,11 +29,7 @@ type Message {
 }
 
 type State {
-  State(
-    port: port_bridge.Port,
-    pending_frames: List(BitArray),
-    closed: Bool,
-  )
+  State(port: port_bridge.Port, pending_frames: List(BitArray), closed: Bool)
 }
 
 /// 从设备读取一帧原始以太网数据。
@@ -108,7 +104,11 @@ fn start(
             })
 
           Ok(
-            otp_actor.initialised(State(port:, pending_frames: [], closed: False))
+            otp_actor.initialised(State(
+              port:,
+              pending_frames: [],
+              closed: False,
+            ))
             |> otp_actor.selecting(selector)
             |> otp_actor.returning(subject),
           )
@@ -148,20 +148,20 @@ fn handle_message(
 
     PortEvent(port_bridge.Frame(frame)) ->
       otp_actor.continue(
-        State(..state, pending_frames: list.append(state.pending_frames, [frame])),
+        State(
+          ..state,
+          pending_frames: list.append(state.pending_frames, [frame]),
+        ),
       )
 
     PortEvent(port_bridge.ExitStatus(_code)) ->
       otp_actor.continue(State(..state, closed: True))
 
-    PortEvent(port_bridge.Timeout) ->
-      otp_actor.continue(state)
+    PortEvent(port_bridge.Timeout) -> otp_actor.continue(state)
 
-    PortEvent(port_bridge.Unknown) ->
-      otp_actor.continue(state)
+    PortEvent(port_bridge.Unknown) -> otp_actor.continue(state)
 
-    IgnoredPortMessage ->
-      otp_actor.continue(state)
+    IgnoredPortMessage -> otp_actor.continue(state)
 
     Stop -> {
       helper_launcher.stop(state.port)

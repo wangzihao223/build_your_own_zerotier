@@ -181,7 +181,10 @@ pub fn send_to_device(client: Client, frame: BitArray) -> Nil {
 }
 
 /// 执行一次“device -> transport”的泵送。
-pub fn pump_device_to_switch_once(client: Client, timeout_ms: Int) -> PumpResult {
+pub fn pump_device_to_switch_once(
+  client: Client,
+  timeout_ms: Int,
+) -> PumpResult {
   let reply_to = new_subject()
   send(client.subject, runtime.PumpDeviceToSwitchOnce(timeout_ms, reply_to))
 
@@ -192,7 +195,10 @@ pub fn pump_device_to_switch_once(client: Client, timeout_ms: Int) -> PumpResult
 }
 
 /// 执行一次“transport -> device”的泵送。
-pub fn pump_switch_to_device_once(client: Client, timeout_ms: Int) -> PumpResult {
+pub fn pump_switch_to_device_once(
+  client: Client,
+  timeout_ms: Int,
+) -> PumpResult {
   let reply_to = new_subject()
   send(client.subject, runtime.PumpSwitchToDeviceOnce(timeout_ms, reply_to))
 

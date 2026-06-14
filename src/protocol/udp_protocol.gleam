@@ -51,7 +51,9 @@ pub type DecodeError {
 }
 
 /// 把客户端消息编码成 UDP payload。
-pub fn encode_client_message(message: ClientMessage) -> Result(BitArray, String) {
+pub fn encode_client_message(
+  message: ClientMessage,
+) -> Result(BitArray, String) {
   case message {
     Hello(client_id) -> {
       let client_id_bytes = bit_array.from_string(client_id)
@@ -69,7 +71,9 @@ pub fn encode_client_message(message: ClientMessage) -> Result(BitArray, String)
 }
 
 /// 把服务端消息编码成 UDP payload。
-pub fn encode_server_message(message: ServerMessage) -> Result(BitArray, String) {
+pub fn encode_server_message(
+  message: ServerMessage,
+) -> Result(BitArray, String) {
   case message {
     Welcome -> Ok(<<welcome_tag>>)
     ServerFrame(frame) -> Ok(<<server_frame_tag, frame:bits>>)

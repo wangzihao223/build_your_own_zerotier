@@ -247,7 +247,9 @@ fn stop_state(state: State) -> Nil {
   }
 }
 
-fn open_and_handshake(config: UdpStartConfig) -> Result(udp.Udp, UdpStartError) {
+fn open_and_handshake(
+  config: UdpStartConfig,
+) -> Result(udp.Udp, UdpStartError) {
   case net.port(config.local_port), net.port(config.server_port) {
     Ok(local_port), Ok(server_port) -> {
       let server_address = net.hostname(config.server_host)

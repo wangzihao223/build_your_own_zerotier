@@ -65,7 +65,11 @@ pub fn disconnect(server: Server, client_id: ClientId) -> Nil {
 }
 
 /// 向 VSwitch 提交一帧来自某客户端的上行帧。
-pub fn receive_from(server: Server, client_id: ClientId, frame: BitArray) -> Nil {
+pub fn receive_from(
+  server: Server,
+  client_id: ClientId,
+  frame: BitArray,
+) -> Nil {
   process.send(server.subject, ReceiveFrom(client_id, frame))
 }
 

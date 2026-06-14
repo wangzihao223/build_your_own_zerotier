@@ -1,6 +1,9 @@
 import gleeunit
 import protocol/ethernet
 import protocol/udp_protocol
+import transport/client as transport
+import transport/udp_client
+import transport/udp_server
 import vport/client as vport
 import vswitch/server as vswitch
 import vswitch/switch_table as switch
@@ -314,6 +317,36 @@ pub fn encode_server_frame_test() {
 pub fn decode_server_frame_test() {
   assert udp_protocol.decode_server_message(<<0x04, 0x11, 0x22, 0x33>>)
     == Ok(udp_protocol.ServerFrame(<<0x11, 0x22, 0x33>>))
+}
+
+pub fn udp_server_accepts_multiple_clients_test() {
+  let assert Ok(switch_server) = vswitch.start()
+  let assert Ok(server) =
+    udp_server.start(udp_server.UdpServerConfig(
+      vswitch: switch_server,
+      bind_host: "127.0.0.1",
+      bind_port: 0,
+    ))
+
+  let assert Ok(client_1) =
+    udp_client.connect(udp_client.UdpClientConfig(
+      client_id: "client-1",
+      server_host: "127.0.0.1",
+      server_port: udp_server.bound_port(server),
+      local_port: 0,
+    ))
+
+  let assert Ok(client_2) =
+    udp_client.connect(udp_client.UdpClientConfig(
+      client_id: "client-2",
+      server_host: "127.0.0.1",
+      server_port: udp_server.bound_port(server),
+      local_port: 0,
+    ))
+
+  transport.stop(client_1)
+  transport.stop(client_2)
+  udp_server.stop(server)
 }
 
 fn ethernet_frame(
